@@ -1,0 +1,155 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #080c14;
+  color: #f1f5f9;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b111e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-glow {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.15);
+}
+
+/* Ticket notch effects */
+.ticket-notch-l {
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #080c14;
+  box-shadow: inset -2px 0 3px rgba(0, 0, 0, 0.5);
+}
+
+.ticket-notch-r {
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #080c14;
+  box-shadow: inset 2px 0 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Hologram foil effect for digital pass */
+.hologram-shimmer {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(16, 185, 129, 0.08) 25%,
+    rgba(56, 189, 248, 0.08) 50%,
+    rgba(168, 85, 247, 0.08) 75%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 200% 200%;
+}
+
+/* ========================================================================= */
+/* HTML5-QRCode Viewfinder Overrides (Removes default white rectangle)       */
+/* ========================================================================= */
+#reader-viewport {
+  position: relative !important;
+  border: none !important;
+}
+
+#reader-viewport video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+/* Eliminate default white shaded region, corner paths, and injected SVG */
+#reader-viewport #qr-shaded-region,
+#reader-viewport #qr-shaded-region * {
+  display: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  opacity: 0 !important;
+}
+
+#reader-viewport svg {
+  display: none !important;
+}
+
+#reader-viewport img {
+  display: none !important;
+}
+
+#reader-viewport__scan_region {
+  border: none !important;
+}
+
+#reader-viewport__dashboard {
+  display: none !important;
+}
+
+/* Golden laser scanline sweeping smoothly from top to bottom */
+@keyframes golden-laser-sweep {
+  0% {
+    top: 2%;
+    opacity: 0.4;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  98% {
+    top: calc(100% - 3px);
+    opacity: 0.4;
+  }
+  100% {
+    top: calc(100% - 3px);
+    opacity: 0;
+  }
+}
+
+.animate-golden-laser {
+  animation: golden-laser-sweep 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
