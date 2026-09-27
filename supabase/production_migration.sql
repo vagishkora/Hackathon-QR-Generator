@@ -3,7 +3,25 @@
 -- Enables cross-device live sync between Participant Phones and Admin Scanners
 -- ==============================================================================
 
--- 1. DROP CONSTRAINTS THAT RESTRICT USERS TO SUPABASE AUTH (auth.users)
+-- 1. DROP ALL OLD POLICIES FIRST (Postgres requires policies dropped before altering column types)
+DROP POLICY IF EXISTS "Users can read own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own non-sensitive profile" ON public.profiles;
+DROP POLICY IF EXISTS "Allow user profile creation on signup" ON public.profiles;
+DROP POLICY IF EXISTS "Public all profiles" ON public.profiles;
+
+DROP POLICY IF EXISTS "Participants can view their own pass" ON public.passes;
+DROP POLICY IF EXISTS "Admins can update passes" ON public.passes;
+DROP POLICY IF EXISTS "Admins can insert passes" ON public.passes;
+DROP POLICY IF EXISTS "Public all passes" ON public.passes;
+
+DROP POLICY IF EXISTS "Admins and scanners can view entry logs" ON public.entry_logs;
+DROP POLICY IF EXISTS "Admins and scanners can insert entry logs" ON public.entry_logs;
+DROP POLICY IF EXISTS "Public all entry_logs" ON public.entry_logs;
+
+DROP POLICY IF EXISTS "Admins can do everything on approved_participants" ON public.approved_participants;
+DROP POLICY IF EXISTS "Public all approved_participants" ON public.approved_participants;
+
+-- 2. DROP CONSTRAINTS RESTRICTING TO SUPABASE AUTH (auth.users)
 ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_user_id_fkey;
 ALTER TABLE public.passes DROP CONSTRAINT IF EXISTS passes_scanned_by_fkey;
 ALTER TABLE public.passes DROP CONSTRAINT IF EXISTS passes_user_id_fkey;
@@ -11,7 +29,7 @@ ALTER TABLE public.entry_logs DROP CONSTRAINT IF EXISTS entry_logs_scanned_by_fk
 ALTER TABLE public.entry_logs DROP CONSTRAINT IF EXISTS entry_logs_participant_id_fkey;
 ALTER TABLE public.entry_logs DROP CONSTRAINT IF EXISTS entry_logs_pass_id_fkey;
 
--- 2. CONVERT UUID COLUMNS TO TEXT (Allows custom user IDs & pass IDs)
+-- 3. CONVERT UUID COLUMNS TO TEXT (Allows custom participant IDs & tokens)
 ALTER TABLE public.profiles ALTER COLUMN user_id TYPE TEXT;
 ALTER TABLE public.passes ALTER COLUMN pass_id TYPE TEXT;
 ALTER TABLE public.passes ALTER COLUMN user_id TYPE TEXT;
@@ -21,31 +39,24 @@ ALTER TABLE public.entry_logs ALTER COLUMN pass_id TYPE TEXT;
 ALTER TABLE public.entry_logs ALTER COLUMN participant_id TYPE TEXT;
 ALTER TABLE public.entry_logs ALTER COLUMN scanned_by TYPE TEXT;
 
--- 3. RE-ADD CASCADING FOREIGN KEY
+-- 4. RE-ADD CASCADING PASS FOREIGN KEY
 ALTER TABLE public.passes 
   DROP CONSTRAINT IF EXISTS passes_user_id_fkey,
   ADD CONSTRAINT passes_user_id_fkey 
   FOREIGN KEY (user_id) REFERENCES public.profiles(user_id) ON DELETE CASCADE;
 
--- 4. OPEN ROW LEVEL SECURITY (RLS) FOR HACKATHON OPERATIONS
+-- 5. OPEN ROW LEVEL SECURITY (RLS) FOR LIVE SCANNING
 ALTER TABLE public.approved_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.passes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.entry_logs ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Public all approved_participants" ON public.approved_participants;
 CREATE POLICY "Public all approved_participants" ON public.approved_participants FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Public all profiles" ON public.profiles;
 CREATE POLICY "Public all profiles" ON public.profiles FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Public all passes" ON public.passes;
 CREATE POLICY "Public all passes" ON public.passes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Public all entry_logs" ON public.entry_logs;
 CREATE POLICY "Public all entry_logs" ON public.entry_logs FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
--- 5. ATOMIC SCAN VALIDATION RPC (Postgres Atomic Row Lock)
+-- 6. ATOMIC SCAN VALIDATION RPC
 CREATE OR REPLACE FUNCTION public.scan_qr_pass(p_token TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -136,7 +147,7 @@ BEGIN
 END;
 $$;
 
--- 6. SEED TEST PARTICIPANT PROFILE & PASS (Immediate verification test)
+-- 7. SEED TEST PARTICIPANT PROFILE & PASS
 INSERT INTO public.approved_participants (email, name, team, college, usn, phone)
 VALUES ('test@hackdays.io', 'Tech Team Test', 'Tech Team', 'NMAMIT', '4NM23CS001', '+91 98765 43210')
 ON CONFLICT (email) DO UPDATE SET
