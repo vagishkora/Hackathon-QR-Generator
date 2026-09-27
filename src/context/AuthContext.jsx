@@ -319,6 +319,18 @@ export function AuthProvider({ children }) {
       setUser(mockUser);
       setProfile(localUser);
       setRole(localUser.role || 'participant');
+
+      // Sync to live Supabase cloud database so any external scanner device can immediately verify it
+      try {
+        supabase.from('profiles').upsert([localUser], { onConflict: 'user_id' }).then(() => {
+          const localPasses = getSafeLocalStorage('hackpass_v2_passes', []);
+          const myPass = localPasses.find(p => p.user_id === localUser.user_id);
+          if (myPass) {
+            supabase.from('passes').upsert([myPass], { onConflict: 'user_id' });
+          }
+        }).catch(() => {});
+      } catch (e) {}
+
       return { user: mockUser };
     }
 

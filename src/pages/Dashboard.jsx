@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getParticipantPass, regenerateTestPass } from '../supabase/queries';
+import { supabase } from '../supabase/client';
 import { PassCard } from '../components/PassCard';
 import { HACKATHON_CONFIG } from '../supabase/client';
 import WebThreads from '../components/WebThreads';
@@ -145,12 +146,35 @@ export function Dashboard() {
     }
     loadData();
 
-    // Auto-refresh every 1.5 seconds to detect live scans across devices in real time
+    // 1. Live polling fallback (detects scans across any cellular network)
     const interval = setInterval(loadData, 1500);
+
+    // 2. Real-time WebSocket listener via Supabase
+    let channel;
+    try {
+      channel = supabase
+        .channel(`pass-live-${user?.id || 'client'}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'passes' },
+          (payload) => {
+            if (payload?.new) {
+              setPass(prev => {
+                if (!prev || payload.new.user_id === prev.user_id || payload.new.token === prev.token) {
+                  return { ...prev, ...payload.new };
+                }
+                return prev;
+              });
+            }
+          }
+        )
+        .subscribe();
+    } catch (e) {}
 
     return () => {
       mounted = false;
       clearInterval(interval);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [user]);
 

@@ -235,72 +235,116 @@ export async function registerParticipant({ email, password, name, phone, colleg
 export async function getParticipantPass(userId, userEmail) {
   let profile = null;
   let pass = null;
+  const cleanEmail = (userEmail || '').trim().toLowerCase();
 
-  // 1. Try server sync API first (bridges phone ↔ laptop live!)
+  // 1. Primary: Fetch from Supabase (shared cloud across all devices/networks)
   try {
-    const res = await fetch(`/api/sync/pass?userId=${encodeURIComponent(userId || '')}&email=${encodeURIComponent(userEmail || '')}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.pass) pass = data.pass;
-      if (data.profile) profile = data.profile;
-    }
-  } catch (e) {}
+    if (cleanEmail) {
+      const { data: profData } = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('email', cleanEmail)
+        .maybeSingle();
 
-  // 2. Try Supabase
-  if ((!profile || !pass) && userId) {
-    try {
+      if (profData) {
+        profile = profData;
+        const { data: passData } = await supabase
+          .from('passes')
+          .select('*')
+          .eq('user_id', profData.user_id)
+          .maybeSingle();
+        if (passData) pass = passData;
+      }
+    } else if (userId) {
       const { data: profData } = await supabase
         .from('profiles')
         .select('*')
         .eq('user_id', userId)
         .maybeSingle();
-      if (profData) profile = profData;
 
-      const { data: passData } = await supabase
+      if (profData) {
+        profile = profData;
+        const { data: passData } = await supabase
+          .from('passes')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (passData) pass = passData;
+      }
+    }
+  } catch (e) {
+    console.warn('Supabase pass fetch error:', e);
+  }
+
+  // 1b. Try server sync API if running locally in Vite dev
+  if (!profile || !pass) {
+    try {
+      const res = await fetch(`/api/sync/pass?userId=${encodeURIComponent(userId || '')}&email=${encodeURIComponent(cleanEmail)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.pass) pass = data.pass;
+        if (data.profile) profile = data.profile;
+      }
+    } catch (e) {}
+  }
+
+  // 2. Secondary: Check local fallback store
+  const localProfiles = getLocalStore(LS_PROFILES, []);
+  const localPasses = getLocalStore(LS_PASSES, []);
+
+  if (!profile) {
+    profile = localProfiles.find(
+      p => (userId && p.user_id === userId) || (cleanEmail && p.email?.toLowerCase() === cleanEmail)
+    );
+  }
+
+  if (profile && !pass) {
+    pass = localPasses.find(p => p.user_id === profile.user_id);
+  }
+
+  // 3. Auto-generate pass if missing
+  if (profile && !pass) {
+    const newPass = {
+      pass_id: `pass_${Date.now()}`,
+      user_id: profile.user_id,
+      token: generateSecurePassToken(),
+      status: 'active',
+      used: false,
+      entry_status: 'not_entered',
+      entry_time: null,
+      created_at: new Date().toISOString(),
+    };
+    localPasses.push(newPass);
+    setLocalStore(LS_PASSES, localPasses);
+    pass = newPass;
+  }
+
+  // 4. Ensure profile and pass are pushed/synced to Supabase so scanners on ANY phone can verify them!
+  if (profile && pass) {
+    try {
+      await supabase.from('profiles').upsert([profile], { onConflict: 'user_id' });
+      const { data: existingDbPass } = await supabase
         .from('passes')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', profile.user_id)
         .maybeSingle();
-      if (passData) pass = passData;
+
+      if (existingDbPass) {
+        // If server says pass is used, server is the absolute source of truth!
+        if (existingDbPass.used || existingDbPass.entry_status === 'entered') {
+          pass = { ...pass, ...existingDbPass };
+        }
+      } else {
+        await supabase.from('passes').upsert([pass], { onConflict: 'user_id' });
+      }
     } catch (e) {
-      console.warn('Supabase fetch error, checking local store:', e);
+      console.warn('Error syncing pass to Supabase:', e);
     }
   }
 
-  // 3. Check local fallback if not found
-  if (!profile || !pass) {
-    const cleanEmail = (userEmail || '').toLowerCase();
-    const profiles = getLocalStore(LS_PROFILES, []);
-    const passes = getLocalStore(LS_PASSES, []);
-
-    profile = profile || profiles.find(p => p.user_id === userId || (cleanEmail && p.email?.toLowerCase() === cleanEmail));
-    
-    if (profile) {
-      pass = pass || passes.find(p => p.user_id === profile.user_id);
-    }
-
-    // Auto-generate pass if missing
-    if (profile && !pass) {
-      const newPass = {
-        pass_id: `pass_${Date.now()}`,
-        user_id: profile.user_id,
-        token: generateSecurePassToken(),
-        status: 'active',
-        used: false,
-        entry_status: 'not_entered',
-        entry_time: null,
-        created_at: new Date().toISOString(),
-      };
-      passes.push(newPass);
-      setLocalStore(LS_PASSES, passes);
-      pass = newPass;
-    }
-  }
-
-  // 4. Always mirror server state to localStorage so offline/direct access matches
+  // 5. Always mirror current state to localStorage so offline/direct access matches
   if (pass) {
-    const localPasses = getLocalStore(LS_PASSES, []);
-    const idx = localPasses.findIndex(p => p.token === pass.token || p.pass_id === pass.pass_id || (pass.user_id && p.user_id === pass.user_id));
+    const idx = localPasses.findIndex(p => p.user_id === pass.user_id || p.token === pass.token);
     if (idx !== -1) {
       localPasses[idx] = { ...localPasses[idx], ...pass };
     } else {
@@ -309,15 +353,14 @@ export async function getParticipantPass(userId, userEmail) {
     setLocalStore(LS_PASSES, localPasses);
   }
 
-  // 5. Broadcast to sync server
-  if (profile && pass) {
-    try {
-      fetch('/api/sync/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profile, pass }),
-      }).catch(() => {});
-    } catch (e) {}
+  if (profile) {
+    const pIdx = localProfiles.findIndex(p => p.user_id === profile.user_id || p.email?.toLowerCase() === cleanEmail);
+    if (pIdx !== -1) {
+      localProfiles[pIdx] = { ...localProfiles[pIdx], ...profile };
+    } else {
+      localProfiles.push(profile);
+    }
+    setLocalStore(LS_PROFILES, localProfiles);
   }
 
   return { profile, pass };
@@ -335,27 +378,7 @@ export async function regenerateTestPass(email = 'test@hackdays.io') {
 
   const newToken = generateSecurePassToken();
 
-  // 1. Call server sync API
-  let serverPass = null;
-  let serverProfile = null;
-  try {
-    const res = await fetch('/api/sync/regenerate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: cleanEmail }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.pass) {
-        serverPass = data.pass;
-        serverProfile = data.profile;
-      }
-    }
-  } catch (e) {}
-
-  const finalToken = serverPass?.token || newToken;
-
-  // 2. Update local storage
+  // 1. Update local storage
   const localPasses = getLocalStore(LS_PASSES, []);
   const localProfiles = getLocalStore(LS_PROFILES, []);
   
@@ -376,12 +399,12 @@ export async function regenerateTestPass(email = 'test@hackdays.io') {
     setLocalStore(LS_PROFILES, localProfiles);
   }
 
-  let targetPass = localPasses.find(p => p.user_id === targetProfile.user_id || p.token === finalToken);
+  let targetPass = localPasses.find(p => p.user_id === targetProfile.user_id);
   if (!targetPass) {
     targetPass = {
-      pass_id: serverPass?.pass_id || `pass_test_${Date.now()}`,
+      pass_id: 'pass_test_001',
       user_id: targetProfile.user_id,
-      token: finalToken,
+      token: newToken,
       status: 'active',
       used: false,
       entry_status: 'not_entered',
@@ -391,7 +414,7 @@ export async function regenerateTestPass(email = 'test@hackdays.io') {
     };
     localPasses.push(targetPass);
   } else {
-    targetPass.token = finalToken;
+    targetPass.token = newToken;
     targetPass.status = 'active';
     targetPass.used = false;
     targetPass.entry_status = 'not_entered';
@@ -400,36 +423,35 @@ export async function regenerateTestPass(email = 'test@hackdays.io') {
   }
   setLocalStore(LS_PASSES, localPasses);
 
-  // 3. Clear audit logs for test account
+  // 2. Clear audit logs for test account
   const localLogs = getLocalStore(LS_LOGS, []);
   setLocalStore(LS_LOGS, localLogs.filter(l => l.participant_email?.toLowerCase() !== cleanEmail));
 
-  // 4. Update Supabase if available
+  // 3. Update Supabase live cloud database
   try {
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('user_id')
-      .ilike('email', cleanEmail)
-      .maybeSingle();
+    await supabase.from('profiles').upsert([targetProfile], { onConflict: 'user_id' });
+    await supabase.from('passes').upsert([{
+      pass_id: targetPass.pass_id,
+      user_id: targetProfile.user_id,
+      token: newToken,
+      status: 'active',
+      used: false,
+      entry_status: 'not_entered',
+      entry_time: null,
+      scanned_by: null,
+    }], { onConflict: 'user_id' });
+    await supabase.from('entry_logs').delete().eq('participant_id', targetProfile.user_id);
+  } catch (e) {
+    console.warn('Supabase pass regenerate error:', e);
+  }
 
-    if (prof?.user_id) {
-      await supabase
-        .from('passes')
-        .update({
-          token: finalToken,
-          status: 'active',
-          used: false,
-          entry_status: 'not_entered',
-          entry_time: null,
-          scanned_by: null,
-        })
-        .eq('user_id', prof.user_id);
-
-      await supabase
-        .from('entry_logs')
-        .delete()
-        .eq('participant_id', prof.user_id);
-    }
+  // 4. Try Vite server sync if running locally
+  try {
+    await fetch('/api/sync/regenerate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail }),
+    });
   } catch (e) {}
 
   return { pass: targetPass, profile: targetProfile };
@@ -461,6 +483,7 @@ export async function scanQRPass(token, scannerUser) {
         localLogs.unshift({
           entry_id: data.pass_id || `log_${Date.now()}`,
           pass_id: data.pass_id,
+          token: cleanToken,
           participant_name: data.participant?.name,
           participant_email: data.participant?.email,
           team: data.participant?.team,
@@ -468,19 +491,127 @@ export async function scanQRPass(token, scannerUser) {
           scanned_by: scannerUser?.email || 'Admin Scanner',
         });
         setLocalStore(LS_LOGS, localLogs);
+
+        // Update local pass mirror if present
+        const localPasses = getLocalStore(LS_PASSES, []);
+        const tPass = localPasses.find(p => p.token === cleanToken || p.pass_id === data.pass_id);
+        if (tPass) {
+          tPass.used = true;
+          tPass.entry_status = 'entered';
+          tPass.entry_time = data.entry_time;
+          setLocalStore(LS_PASSES, localPasses);
+        }
+
         return data;
       }
       // If pass is already claimed or revoked, return immediately
       if (data.code === 'ALREADY_USED' || data.code === 'PASS_DISABLED') {
         return data;
       }
-      // If Postgres says INVALID_PASS (token not present in remote DB), fall through to check sync server
     }
   } catch (e) {
-    console.warn('RPC call failed, checking server sync:', e);
+    console.warn('RPC call failed, checking direct Supabase query:', e);
   }
 
-  // 2. Call server sync API (synchronizes phone ↔ laptop in real-time)
+  // 2. Direct Supabase Query & Atomic Update (Cloud Fallback for Vercel)
+  try {
+    const { data: dbPass } = await supabase
+      .from('passes')
+      .select('*, profiles(*)')
+      .eq('token', cleanToken)
+      .maybeSingle();
+
+    if (dbPass) {
+      if (dbPass.status === 'disabled') {
+        return {
+          success: false,
+          code: 'PASS_DISABLED',
+          message: 'PASS REVOKED: This pass has been disabled by organizers.',
+        };
+      }
+
+      if (dbPass.used || dbPass.entry_status === 'entered') {
+        return {
+          success: false,
+          code: 'ALREADY_USED',
+          message: 'ALREADY CLAIMED: Meal voucher has already been redeemed!',
+          entry_time: dbPass.entry_time,
+          participant: {
+            name: dbPass.profiles?.name || 'Participant',
+            email: dbPass.profiles?.email,
+            team: dbPass.profiles?.team_name,
+            college: dbPass.profiles?.college,
+          },
+        };
+      }
+
+      const entryTime = new Date().toISOString();
+      const { error: updErr } = await supabase
+        .from('passes')
+        .update({
+          used: true,
+          entry_status: 'entered',
+          entry_time: entryTime,
+          scanned_by: scannerUser?.email || 'Admin Scanner',
+        })
+        .eq('token', cleanToken);
+
+      if (!updErr) {
+        try {
+          await supabase.from('entry_logs').insert([{
+            entry_id: `entry_${Date.now()}`,
+            pass_id: dbPass.pass_id,
+            participant_id: dbPass.user_id,
+            scanned_by: scannerUser?.email || 'Admin Scanner',
+            scanned_at: entryTime,
+          }]);
+        } catch (logErr) {}
+
+        const result = {
+          success: true,
+          code: 'ENTRY_APPROVED',
+          message: 'ENTRY APPROVED: Lunch voucher verified successfully!',
+          pass_id: dbPass.pass_id,
+          entry_time: entryTime,
+          participant: {
+            name: dbPass.profiles?.name || 'Participant',
+            email: dbPass.profiles?.email,
+            team: dbPass.profiles?.team_name,
+            college: dbPass.profiles?.college,
+          },
+        };
+
+        const localLogs = getLocalStore(LS_LOGS, []);
+        localLogs.unshift({
+          entry_id: result.pass_id,
+          pass_id: result.pass_id,
+          token: cleanToken,
+          participant_name: result.participant.name,
+          participant_email: result.participant.email,
+          team: result.participant.team,
+          college: result.participant.college,
+          scanned_at: entryTime,
+          scanned_by: scannerUser?.email || 'Admin Scanner',
+        });
+        setLocalStore(LS_LOGS, localLogs);
+
+        const localPasses = getLocalStore(LS_PASSES, []);
+        const tPass = localPasses.find(p => p.token === cleanToken || p.pass_id === dbPass.pass_id);
+        if (tPass) {
+          tPass.used = true;
+          tPass.entry_status = 'entered';
+          tPass.entry_time = entryTime;
+          setLocalStore(LS_PASSES, localPasses);
+        }
+
+        return result;
+      }
+    }
+  } catch (e) {
+    console.warn('Direct Supabase scan error:', e);
+  }
+
+  // 3. Call server sync API (synchronizes phone ↔ laptop in local dev)
   try {
     const sRes = await fetch('/api/sync/scan', {
       method: 'POST',
@@ -515,28 +646,12 @@ export async function scanQRPass(token, scannerUser) {
           targetPass.scanned_by = scannerUser?.email || 'Admin Scanner';
           setLocalStore(LS_PASSES, localPasses);
         }
-
-        // Try to update Supabase if available
-        try {
-          await supabase.from('passes').update({
-            used: true,
-            entry_status: 'entered',
-            entry_time: sData.entry_time || new Date().toISOString(),
-          }).eq('token', cleanToken);
-          if (sData.pass_id && sData.participant?.user_id) {
-            await supabase.from('entry_logs').insert([{
-              pass_id: sData.pass_id,
-              participant_id: sData.participant.user_id,
-              scanned_at: sData.entry_time || new Date().toISOString(),
-            }]);
-          }
-        } catch (subErr) {}
       }
       return sData;
     }
   } catch (e) {}
 
-  // 3. Concurrency-Safe Local Scan Engine (Fallback)
+  // 4. Concurrency-Safe Local Scan Engine (Fallback)
   const passes = getLocalStore(LS_PASSES, []);
   const profiles = getLocalStore(LS_PROFILES, []);
   let passIdx = passes.findIndex(p => p.token === cleanToken);
