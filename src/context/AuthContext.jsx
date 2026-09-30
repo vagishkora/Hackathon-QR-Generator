@@ -229,15 +229,46 @@ export function AuthProvider({ children }) {
       // Supabase user doesn't exist or table pending, fall through to auto-account provision
     }
 
-    // 4. Check existing profiles in local store
-    const localProfiles = getSafeLocalStorage('hackpass_v2_profiles', []);
-    let localUser = localProfiles.find(p => p.email?.toLowerCase() === cleanEmail);
+    // 4. Check existing profiles in Supabase first, then local store
+    let localUser = null;
+    try {
+      const { data: profData } = await supabase
+        .from('profiles')
+        .select('*')
+        .ilike('email', cleanEmail)
+        .maybeSingle();
+      if (profData) {
+        localUser = profData;
+      }
+    } catch (e) {
+      console.warn('Supabase profile query error:', e);
+    }
 
-    // 5. If not registered yet, check if this is an approved participant
-    // Auto-create account and pass immediately so they can log in seamlessly with default password password123!
     if (!localUser) {
-      const approvedList = getSafeLocalStorage('hackpass_v2_approved', INITIAL_APPROVED);
-      const approvedItem = approvedList.find(p => p.email?.toLowerCase() === cleanEmail);
+      const localProfiles = getSafeLocalStorage('hackpass_v2_profiles', []);
+      localUser = localProfiles.find(p => p.email?.toLowerCase() === cleanEmail);
+    }
+
+    // 5. If not registered yet, check Supabase approved_participants first!
+    if (!localUser) {
+      let approvedItem = null;
+      try {
+        const { data: appData } = await supabase
+          .from('approved_participants')
+          .select('*')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+        if (appData) {
+          approvedItem = appData;
+        }
+      } catch (e) {
+        console.warn('Supabase approved query error:', e);
+      }
+
+      if (!approvedItem) {
+        const approvedList = getSafeLocalStorage('hackpass_v2_approved', INITIAL_APPROVED);
+        approvedItem = approvedList.find(p => p.email?.toLowerCase() === cleanEmail);
+      }
 
       if (approvedItem) {
         const autoUserId = `user_${Date.now()}`;
@@ -253,6 +284,7 @@ export function AuthProvider({ children }) {
           disabled: false,
           created_at: new Date().toISOString(),
         };
+        const localProfiles = getSafeLocalStorage('hackpass_v2_profiles', []);
         localProfiles.push(localUser);
         setSafeLocalStorage('hackpass_v2_profiles', localProfiles);
 
@@ -272,14 +304,13 @@ export function AuthProvider({ children }) {
         localPasses.push(newPass);
         setSafeLocalStorage('hackpass_v2_passes', localPasses);
 
-        // Sync with background server
+        // Save immediately to Supabase
         try {
-          fetch('/api/sync/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ profile: localUser, pass: newPass }),
-          }).catch(() => {});
-        } catch (e) {}
+          await supabase.from('profiles').upsert([localUser], { onConflict: 'user_id' });
+          await supabase.from('passes').upsert([newPass], { onConflict: 'user_id' });
+        } catch (subErr) {
+          console.warn('Supabase provision error:', subErr);
+        }
       }
     }
 
