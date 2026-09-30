@@ -315,11 +315,11 @@ export function AuthProvider({ children }) {
     }
 
     if (localUser) {
-      // Check custom password if user changed their initial password
+      // Check custom password if user changed their initial password or set a PIN
       const customPasswords = getSafeLocalStorage('hackpass_v2_passwords', {});
-      const userCustomPass = customPasswords[cleanEmail];
+      const userCustomPass = (localUser.security_pin || customPasswords[cleanEmail] || '').trim();
       if (userCustomPass) {
-        if (password !== userCustomPass) {
+        if ((password || '').trim().toUpperCase() !== userCustomPass.toUpperCase()) {
           throw new Error('Incorrect password. Please enter your personal custom password or PIN.');
         }
       } else {

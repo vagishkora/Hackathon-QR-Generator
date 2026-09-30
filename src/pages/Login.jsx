@@ -114,6 +114,9 @@ export function Login() {
                 <input
                   type="email"
                   required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
@@ -136,6 +139,9 @@ export function Login() {
                 <input
                   type="password"
                   required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
