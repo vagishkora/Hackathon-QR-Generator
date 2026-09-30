@@ -103,24 +103,28 @@ export function Dashboard() {
   const handleResetPass = async () => {
     setResetting(true);
     try {
-      const res = await fetch('/api/sync/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user?.email, token: pass?.token }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.pass) {
-          setPass(data.pass);
-          try {
-            const localPasses = JSON.parse(localStorage.getItem('hackpass_v2_passes') || '[]');
-            const idx = localPasses.findIndex(p => p.token === data.pass.token || p.pass_id === data.pass.pass_id);
-            if (idx !== -1) {
-              localPasses[idx] = data.pass;
-              localStorage.setItem('hackpass_v2_passes', JSON.stringify(localPasses));
-            }
-          } catch {}
+      if (pass?.token) {
+        await supabase
+          .from('passes')
+          .update({
+            used: false,
+            entry_status: 'not_entered',
+            entry_time: null,
+            scanned_by: null,
+          })
+          .eq('token', pass.token);
+
+        if (pass?.pass_id) {
+          await supabase.from('entry_logs').delete().eq('pass_id', pass.pass_id);
         }
+
+        setPass(prev => ({
+          ...prev,
+          used: false,
+          entry_status: 'not_entered',
+          entry_time: null,
+          scanned_by: null,
+        }));
       }
     } catch (e) {
       console.error('Reset error:', e);
