@@ -31,6 +31,7 @@ export function Dashboard() {
   const { user, profile: authProfile, changePassword } = useAuth();
   const [profile, setProfile] = useState(authProfile);
   const [pass, setPass] = useState(null);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -141,6 +142,40 @@ export function Dashboard() {
         if (mounted) {
           if (pData) setProfile(pData);
           if (passData) setPass(passData);
+        }
+
+        // Fetch all teammates from the same team
+        const teamName = pData?.team_name || profile?.team_name;
+        if (teamName && teamName !== 'Individual') {
+          try {
+            const { data: teamApproved } = await supabase
+              .from('approved_participants')
+              .select('*')
+              .ilike('team', teamName.trim());
+
+            if (teamApproved && teamApproved.length > 0) {
+              const { data: teamPasses } = await supabase
+                .from('passes')
+                .select('*, profiles(*)');
+
+              const combined = teamApproved.map(member => {
+                const memberCleanEmail = (member.email || '').toLowerCase();
+                const matchedPass = teamPasses?.find(tp => 
+                  tp.profiles?.email?.toLowerCase() === memberCleanEmail
+                );
+                return {
+                  name: member.name,
+                  email: member.email,
+                  usn: member.usn,
+                  isMe: memberCleanEmail === (user?.email || '').toLowerCase(),
+                  used: matchedPass?.used || false,
+                  entryStatus: matchedPass?.entry_status || 'not_entered',
+                  entryTime: matchedPass?.entry_time || null,
+                };
+              });
+              if (mounted) setTeamMembers(combined);
+            }
+          } catch (teamErr) {}
         }
       } catch (err) {
         console.error('Failed to load pass', err);
@@ -429,6 +464,67 @@ export function Dashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Team Members Grouped Card */}
+            {profile?.team_name && teamMembers.length > 0 && (
+              <div className="rounded-[28px] bg-[#090e1c]/80 backdrop-blur-2xl border border-white/[0.08] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.6),inset_0_1px_0_0_rgba(255,255,255,0.08)] space-y-4 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-purple-400" />
+                    <h2 className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold">
+                      Team Roster: <span className="text-white font-bold">{profile.team_name}</span>
+                    </h2>
+                  </div>
+                  <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/25 font-bold">
+                    {teamMembers.length} {teamMembers.length === 1 ? 'Member' : 'Members'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {teamMembers.map((m) => (
+                    <div 
+                      key={m.email} 
+                      className={`p-4 rounded-2xl border transition-all ${
+                        m.isMe 
+                          ? 'bg-slate-950/80 border-slate-700/80 ring-1 ring-emerald-500/30 shadow-md' 
+                          : 'bg-slate-950/50 border-slate-800/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-slate-400">
+                          {m.isMe ? 'You (Current Pass)' : 'Teammate'}
+                        </span>
+                        {m.used ? (
+                          <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-amber-400" /> LUNCH CLAIMED
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-emerald-400" /> MEAL AVAILABLE
+                          </span>
+                        )}
+                      </div>
+
+                      <h4 className="text-sm font-bold text-white font-sans truncate">
+                        {m.name}
+                      </h4>
+                      <p className="text-xs font-mono text-cyan-400 mt-0.5">
+                        USN: {m.usn || '—'}
+                      </p>
+                      <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
+                        {m.email}
+                      </p>
+
+                      {m.used && m.entryTime && (
+                        <p className="text-[10px] font-mono text-slate-500 mt-2.5 pt-2 border-t border-slate-800/60">
+                          Meal served at {new Date(m.entryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Pass Protection / Security PIN Card */}
             {hasSetPin ? (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   adminGetAllParticipants, 
   adminToggleParticipant, 
@@ -22,7 +22,10 @@ import {
   X,
   ExternalLink,
   ShieldAlert,
-  Trash2
+  Trash2,
+  LayoutGrid,
+  List,
+  ShieldCheck
 } from 'lucide-react';
 
 export function Participants() {
@@ -33,6 +36,7 @@ export function Participants() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'registered' | 'unregistered' | 'entered' | 'not_entered' | 'disabled'
+  const [viewMode, setViewMode] = useState('teams'); // 'teams' | 'table'
 
   // Delete Participant Modal State (Admin Exclusive)
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -222,6 +226,32 @@ export function Participants() {
     return true;
   });
 
+  // Automatically group participants by their team
+  const groupedTeams = useMemo(() => {
+    const map = new Map();
+    filteredParticipants.forEach(p => {
+      const key = (p.team || 'Solo / Unassigned').trim();
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key).push(p);
+    });
+
+    return Array.from(map.entries()).map(([teamName, members]) => {
+      const college = members[0]?.college || 'NMAMIT';
+      const claimedCount = members.filter(m => m.entryStatus === 'entered').length;
+      const registeredCount = members.filter(m => m.isRegistered).length;
+      return {
+        teamName,
+        college,
+        members,
+        claimedCount,
+        registeredCount,
+        totalMembers: members.length,
+      };
+    });
+  }, [filteredParticipants]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#080c14] text-slate-300">
@@ -304,162 +334,379 @@ export function Participants() {
           </div>
         </div>
 
-        {/* Participants Table */}
-        <div className="rounded-3xl glass-panel border border-slate-800 overflow-hidden shadow-2xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 bg-slate-900/60 text-slate-400 font-mono uppercase tracking-wider">
-                  <th className="py-3.5 px-4 font-semibold">Participant Details</th>
-                  <th className="py-3.5 px-4 font-semibold">Team & College</th>
-                  <th className="py-3.5 px-4 font-semibold">Registration</th>
-                  <th className="py-3.5 px-4 font-semibold">Lunch Status</th>
-                  <th className="py-3.5 px-4 font-semibold">Meal Token</th>
-                  <th className="py-3.5 px-4 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 font-mono">
-                {filteredParticipants.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-500 font-mono">
-                      No participants found matching the current search & filters.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredParticipants.map((p) => {
-                    const isEntered = p.entryStatus === 'entered';
-                    const isDisabled = p.disabled || p.passStatus === 'disabled';
+        {/* View Mode Toggle & Status Count Summary */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-slate-400">
+              Showing <strong className="text-white">{filteredParticipants.length}</strong> participants across <strong className="text-emerald-400">{groupedTeams.length}</strong> teams
+            </span>
+          </div>
 
-                    return (
-                      <tr key={p.email} className="hover:bg-slate-900/40 transition">
-                        {/* Name & Email */}
-                        <td className="py-3.5 px-4 font-sans">
-                          <p className="font-bold text-white text-sm">
-                            {p.name}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span className="text-[11px] text-slate-400 font-mono">
-                              {p.email}
-                            </span>
-                            {p.usn && p.usn !== '—' && (
-                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 font-semibold">
-                                {p.usn}
-                              </span>
-                            )}
-                          </div>
-                        </td>
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800 self-start sm:self-auto">
+            <button
+              onClick={() => setViewMode('teams')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition cursor-pointer ${
+                viewMode === 'teams'
+                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Group by Team</span>
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition cursor-pointer ${
+                viewMode === 'table'
+                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+              <span>Table View</span>
+            </button>
+          </div>
+        </div>
 
-                        {/* Team & College */}
-                        <td className="py-3.5 px-4">
-                          <span className="font-semibold text-cyan-300 block">
-                            {p.team || 'Solo'}
+        {/* 1. Grouped by Team View (Default) */}
+        {viewMode === 'teams' ? (
+          <div className="space-y-4">
+            {groupedTeams.length === 0 ? (
+              <div className="py-16 text-center text-slate-500 font-mono glass-panel rounded-3xl border border-slate-800">
+                No teams found matching the current search & filters.
+              </div>
+            ) : (
+              groupedTeams.map((team) => (
+                <div 
+                  key={team.teamName}
+                  className="rounded-2xl glass-panel border border-slate-800/90 bg-[#090e1c]/70 p-5 shadow-xl hover:border-slate-700/80 transition-all space-y-4"
+                >
+                  {/* Team Card Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-black text-sm">
+                        {team.teamName.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-white tracking-wide font-sans">
+                            {team.teamName}
+                          </h3>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                            {team.totalMembers} {team.totalMembers === 1 ? 'Member' : 'Members'}
                           </span>
-                          <span className="text-[11px] text-slate-400 block truncate max-w-[150px]">
-                            {p.college || 'Institution'}
-                          </span>
-                        </td>
+                        </div>
+                        <p className="text-xs text-slate-400 font-sans mt-0.5">
+                          {team.college}
+                        </p>
+                      </div>
+                    </div>
 
-                        {/* Registration Status */}
-                        <td className="py-3.5 px-4">
-                          {p.isRegistered ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
-                              <CheckCircle className="w-3 h-3" /> REGISTERED
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-[10px]">
-                              UNCLAIMED
-                            </span>
-                          )}
-                        </td>
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      {team.claimedCount === team.totalMembers ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold">
+                          <CheckCircle className="w-3.5 h-3.5 text-amber-400" />
+                          All Meals Claimed ({team.claimedCount}/{team.totalMembers})
+                        </span>
+                      ) : team.claimedCount > 0 ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 text-xs font-mono font-bold">
+                          <Clock className="w-3.5 h-3.5 text-sky-400" />
+                          Partial: {team.claimedCount}/{team.totalMembers} Claimed
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 text-xs font-mono font-bold">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                          Available: 0/{team.totalMembers} Claimed
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-                        {/* Pass & Entry Status */}
-                        <td className="py-3.5 px-4">
-                          {isDisabled ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold">
-                              <Ban className="w-3 h-3" /> PASS REVOKED
-                            </span>
-                          ) : isEntered ? (
+                  {/* Team Members List (Side by side on desktop, stacked on mobile) */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {team.members.map((p, idx) => {
+                      const isEntered = p.entryStatus === 'entered';
+                      const isDisabled = p.disabled || p.passStatus === 'disabled';
+                      return (
+                        <div 
+                          key={p.email} 
+                          className={`p-4 rounded-xl border transition-all ${
+                            isEntered 
+                              ? 'bg-amber-950/15 border-amber-500/25' 
+                              : isDisabled 
+                              ? 'bg-red-950/15 border-red-500/20' 
+                              : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                                  Member {idx + 1}
+                                </span>
+                                <h4 className="text-sm font-bold text-white truncate font-sans">
+                                  {p.name}
+                                </h4>
+                              </div>
+
+                              <p className="text-xs font-mono text-cyan-400">
+                                USN: {p.usn || '—'}
+                              </p>
+                              <p className="text-[11px] font-mono text-slate-400 truncate">
+                                {p.email}
+                              </p>
+                              {p.phone && (
+                                <p className="text-[10px] font-mono text-slate-500">
+                                  {p.phone}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Member Meal Status Badge */}
                             <div>
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold">
-                                <CheckCircle className="w-3 h-3" /> LUNCH CLAIMED
-                              </span>
-                              {p.entryTime && (
-                                <span className="block text-[10px] text-slate-500 mt-0.5">
-                                  {new Date(p.entryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {isDisabled ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold">
+                                  <Ban className="w-3 h-3" /> REVOKED
+                                </span>
+                              ) : isEntered ? (
+                                <div className="text-right">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold">
+                                    <CheckCircle className="w-3 h-3" /> CLAIMED
+                                  </span>
+                                  {p.entryTime && (
+                                    <span className="block text-[9px] font-mono text-slate-500 mt-0.5">
+                                      {new Date(p.entryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : p.isRegistered ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                                  AVAILABLE
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px]">
+                                  UNCLAIMED
                                 </span>
                               )}
                             </div>
-                          ) : p.isRegistered ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
-                              MEAL AVAILABLE
-                            </span>
-                          ) : (
-                            <span className="text-slate-500 text-[11px]">—</span>
-                          )}
-                        </td>
-
-                        {/* Pass Token */}
-                        <td className="py-3.5 px-4">
-                          {p.passToken ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] text-slate-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-800 font-mono">
-                                {p.passToken.slice(0, 11)}...
-                              </span>
-                              <button
-                                onClick={() => handleCopy(p.passToken)}
-                                title="Copy token to clipboard"
-                                className="p-1 rounded text-slate-400 hover:text-white"
-                              >
-                                {copiedToken === p.passToken ? (
-                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-slate-600 text-[11px]">Not issued</span>
-                          )}
-                        </td>
-
-                        {/* Actions (Toggle Disable + Delete) */}
-                        <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => handleToggleDisable(p)}
-                              title={p.disabled ? 'Re-enable pass' : 'Revoke & disable pass'}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                                p.disabled
-                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-                              }`}
-                            >
-                              {p.disabled ? 'Restore' : 'Revoke'}
-                            </button>
-
-                            {/* Delete Participant: Admin Exclusive */}
-                            {isAdmin && (
-                              <button
-                                onClick={() => {
-                                  setDeleteError(null);
-                                  setDeleteTarget(p);
-                                }}
-                                title="Permanently delete participant (Admin only)"
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 transition cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+
+                          {/* Bottom Row: Token + Actions */}
+                          <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-800/60 text-xs">
+                            <div className="flex items-center gap-1.5">
+                              {p.passToken ? (
+                                <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                                  <span>{p.passToken.slice(0, 11)}...</span>
+                                  <button
+                                    onClick={() => handleCopy(p.passToken)}
+                                    title="Copy pass token"
+                                    className="hover:text-white cursor-pointer"
+                                  >
+                                    {copiedToken === p.passToken ? (
+                                      <Check className="w-3 h-3 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-600 font-mono">No pass issued</span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleToggleDisable(p)}
+                                title={p.disabled ? 'Re-enable pass' : 'Revoke pass'}
+                                className={`px-2 py-0.5 rounded text-[11px] font-semibold border transition cursor-pointer ${
+                                  p.disabled
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                                }`}
+                              >
+                                {p.disabled ? 'Restore' : 'Revoke'}
+                              </button>
+
+                              {isAdmin && (
+                                <button
+                                  onClick={() => {
+                                    setDeleteError(null);
+                                    setDeleteTarget(p);
+                                  }}
+                                  title="Delete participant"
+                                  className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-        </div>
+        ) : (
+          /* 2. Flat Table View */
+          <div className="rounded-3xl glass-panel border border-slate-800 overflow-hidden shadow-2xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-900/60 text-slate-400 font-mono uppercase tracking-wider">
+                    <th className="py-3.5 px-4 font-semibold">Participant Details</th>
+                    <th className="py-3.5 px-4 font-semibold">Team & College</th>
+                    <th className="py-3.5 px-4 font-semibold">Registration</th>
+                    <th className="py-3.5 px-4 font-semibold">Lunch Status</th>
+                    <th className="py-3.5 px-4 font-semibold">Meal Token</th>
+                    <th className="py-3.5 px-4 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono">
+                  {filteredParticipants.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-slate-500 font-mono">
+                        No participants found matching the current search & filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredParticipants.map((p) => {
+                      const isEntered = p.entryStatus === 'entered';
+                      const isDisabled = p.disabled || p.passStatus === 'disabled';
+
+                      return (
+                        <tr key={p.email} className="hover:bg-slate-900/40 transition">
+                          {/* Name & Email */}
+                          <td className="py-3.5 px-4 font-sans">
+                            <p className="font-bold text-white text-sm">
+                              {p.name}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                {p.email}
+                              </span>
+                              {p.usn && p.usn !== '—' && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 font-semibold">
+                                  {p.usn}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Team & College */}
+                          <td className="py-3.5 px-4">
+                            <span className="font-semibold text-cyan-300 block">
+                              {p.team || 'Solo'}
+                            </span>
+                            <span className="text-[11px] text-slate-400 block truncate max-w-[150px]">
+                              {p.college || 'Institution'}
+                            </span>
+                          </td>
+
+                          {/* Registration Status */}
+                          <td className="py-3.5 px-4">
+                            {p.isRegistered ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                                <CheckCircle className="w-3 h-3" /> REGISTERED
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 text-[10px]">
+                                UNCLAIMED
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Pass & Entry Status */}
+                          <td className="py-3.5 px-4">
+                            {isDisabled ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold">
+                                <Ban className="w-3 h-3" /> PASS REVOKED
+                              </span>
+                            ) : isEntered ? (
+                              <div>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold">
+                                  <CheckCircle className="w-3 h-3" /> LUNCH CLAIMED
+                                </span>
+                                {p.entryTime && (
+                                  <span className="block text-[10px] text-slate-500 mt-0.5">
+                                    {new Date(p.entryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                )}
+                              </div>
+                            ) : p.isRegistered ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                                MEAL AVAILABLE
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 text-[11px]">—</span>
+                            )}
+                          </td>
+
+                          {/* Pass Token */}
+                          <td className="py-3.5 px-4">
+                            {p.passToken ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-slate-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-800 font-mono">
+                                  {p.passToken.slice(0, 11)}...
+                                </span>
+                                <button
+                                  onClick={() => handleCopy(p.passToken)}
+                                  title="Copy token to clipboard"
+                                  className="p-1 rounded text-slate-400 hover:text-white cursor-pointer"
+                                >
+                                  {copiedToken === p.passToken ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-600 text-[11px]">Not issued</span>
+                            )}
+                          </td>
+
+                          {/* Actions (Toggle Disable + Delete) */}
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleToggleDisable(p)}
+                                title={p.disabled ? 'Re-enable pass' : 'Revoke & disable pass'}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                                  p.disabled
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                                }`}
+                              >
+                                {p.disabled ? 'Restore' : 'Revoke'}
+                              </button>
+
+                              {/* Delete Participant: Admin Exclusive */}
+                              {isAdmin && (
+                                <button
+                                  onClick={() => {
+                                    setDeleteError(null);
+                                    setDeleteTarget(p);
+                                  }}
+                                  title="Permanently delete participant (Admin only)"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 border border-slate-800 hover:border-red-500/30 transition cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Modal: Add Participant Manually */}
         {showAddModal && (
