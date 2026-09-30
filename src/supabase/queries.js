@@ -809,6 +809,8 @@ export async function adminGetAllParticipants() {
   let profiles = [];
   let passes = [];
 
+  let isCloudConnected = false;
+
   // Try Supabase tables
   try {
     const [appRes, profRes, passRes] = await Promise.all([
@@ -817,31 +819,43 @@ export async function adminGetAllParticipants() {
       supabase.from('passes').select('*'),
     ]);
 
-    if (!appRes.error && appRes.data?.length) approved = appRes.data;
-    if (!profRes.error && profRes.data?.length) profiles = profRes.data;
-    if (!passRes.error && passRes.data?.length) passes = passRes.data;
+    if (!appRes.error && Array.isArray(appRes.data)) {
+      approved = appRes.data;
+      isCloudConnected = true;
+      setLocalStore(LS_APPROVED, approved);
+    }
+    if (!profRes.error && Array.isArray(profRes.data)) {
+      profiles = profRes.data;
+      setLocalStore(LS_PROFILES, profiles);
+    }
+    if (!passRes.error && Array.isArray(passRes.data)) {
+      passes = passRes.data;
+      setLocalStore(LS_PASSES, passes);
+    }
   } catch (e) {
-    console.warn('Supabase fetch failed, combining with local store');
+    console.warn('Supabase fetch failed, falling back to local store');
   }
 
-  // Merge with local store to ensure user sees uploaded or seeded data
-  const localApproved = getLocalStore(LS_APPROVED, INITIAL_APPROVED);
-  const localProfiles = getLocalStore(LS_PROFILES, []);
-  const localPasses = getLocalStore(LS_PASSES, []);
+  // Fallback to local store only if cloud is completely unreachable
+  if (!isCloudConnected) {
+    approved = getLocalStore(LS_APPROVED, INITIAL_APPROVED);
+    profiles = getLocalStore(LS_PROFILES, []);
+    passes = getLocalStore(LS_PASSES, []);
+  }
 
   // Merge lists by email
   const approvedMap = new Map();
-  [...localApproved, ...approved].forEach(item => {
+  approved.forEach(item => {
     approvedMap.set(item.email.toLowerCase(), item);
   });
 
   const profilesMap = new Map();
-  [...localProfiles, ...profiles].forEach(item => {
+  profiles.forEach(item => {
     profilesMap.set(item.email.toLowerCase(), item);
   });
 
   const passesMap = new Map();
-  [...localPasses, ...passes].forEach(item => {
+  passes.forEach(item => {
     passesMap.set(item.user_id, item);
   });
 
